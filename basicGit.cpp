@@ -5,6 +5,7 @@
 #include <filesystem>
 #include "basicGit.h"
 #include <vector>
+#include <map>
 
         void basicGit::init() {
             // Create Folder
@@ -20,34 +21,32 @@
         }
 
         void basicGit::add(const std::string& fileName) { // create and store blob object
-            // Code to add a file to the staging area
-            std::string file_Content="";
-            FILE* file;
-            file =fopen(fileName.c_str(),"r");
-            if(file){
-                char cont[1024];
-                while(fgets(cont,sizeof(cont),file)){
-                    file_Content+= cont;
-                }
-                fclose(file);
+        std::ifstream file(fileName, std::ios::binary);
+        if(!file) {
+            std::cout << "Error Opening File" << std::endl;
+            return;
+        }
+        std::ostringstream ss;
+        ss << file.rdbuf();
+        std::string content = ss.str();
 
-            } else {
-                std::cout << "Error Opening File" << std::endl;
-            }
+        std::string header = "blob " + std::to_string(content.size()) + '\0';
+        std::string blobData = header + content;
+
 
             //SHA-1 Hash of Content
-            std::string hashedFile = hash(file_Content);
+            std::string hashedFile = hash(blobData);
 
+            std::filesystem::create_directory(".BasicGit/objects/" + hashedFile.substr(0,2));
+            
             //Write Blob file to BasicGit/object/hast
-            std::string blobPath = ".BasicGit/objects/" + hashedFile;
-            std::ofstream blobFile(blobPath);
+            std::string blobPath = ".BasicGit/objects/" + hashedFile.substr(0,2) + "/" + hashedFile.substr(2);
 
-            blobFile << file_Content;
+            std::ofstream blobFile(blobPath, std::ios::binary);
+            blobFile.write(blobData.data(), blobData.size());
             blobFile.close();
             //Update index File (file path/hash of blob)
-            std::ofstream indexFile(".BasicGit/index", std::ios::app);
-            indexFile << hashedFile << " " << fileName << std::endl;
-            indexFile.close();
+            updateIndex(hashedFile, fileName);
         }
 
         std::string basicGit::hash(const std::string& fileName){
@@ -178,7 +177,6 @@
             ss << std::setw(8) << h4;
             //join hexadecimal together and return
             std::string finalHash = ss.str();
-            std::cout << "SHA-1 Hash: " << finalHash << std::endl;
             return finalHash;
         }
 
@@ -214,6 +212,97 @@
             return result;
         }
         
+        void basicGit::updateIndex(std::string hashedFile, std::string fileName){
+            std::map<std::string, std::string> file_Content;
+            std::ifstream indexFile(".BasicGit/index");
+            std::string line_Hash, line_Name;
+            while(indexFile >> line_Hash >> line_Name ){
+                file_Content.insert({line_Name,line_Hash});
+            }
+            indexFile.close();
+            file_Content[fileName] = hashedFile;
+
+            //Remake Index File
+            std::ofstream newIndexFile(".BasicGit/index");
+            for(auto files : file_Content){
+                newIndexFile << files.second << " " << files.first << "\n";
+            }
+            newIndexFile.close();
+        }
+
+        void basicGit::status(){
+            std::ifstream file(".basicgit/index");
+            
+            std::string data;
+
+            std::vector<std::string> unstaged;            
+            std::vector<std::string> staged;
+            std::vector<std::string> untracked;
+            std::string hashName;
+            std::string fileName;
+            
+            while(file >> hashName >> fileName){
+
+                std::ifstream file(fileName, std::ios::binary);
+                std::ostringstream ss;
+                ss << file.rdbuf();
+                std::string content = ss.str();
+
+                std::string header = "blob " + std::to_string(content.size()) + '\0';
+                std::string blobData = header + content;
+                std::string newHashcode = hash(blobData);
+
+                if(hashName == newHashcode){
+                    staged.push_back(fileName);
+                } else if (hashName != newHashcode){
+                    unstaged.push_back(fileName);
+                }
+            }
+
+            std::string path = ".";
+            for (auto it = std::filesystem::recursive_directory_iterator(path); it != std::filesystem::recursive_directory_iterator(); ++it) {
+            const auto& entry = *it;
+
+            if (entry.is_directory() && entry.path().filename().string().rfind(".", 0) == 0) {
+                it.disable_recursion_pending(); // Prevent going deeper into this directory
+                continue;
+            } else if (entry.is_regular_file()) {
+                std::string newFile = entry.path().filename().string();
+                bool exists= false;
+                for(size_t i=0;i<staged.size();i++){
+                    if(staged.at(i) ==newFile){
+                        exists= true;
+                    }
+                }
+                for(size_t i=0;i<unstaged.size();i++){
+                    if(unstaged.at(i) ==newFile){
+                        exists= true;
+                    }
+                }
+                if(exists==false){
+                    untracked.push_back(newFile);
+                }
+            }
+        }
+            
+            //Output
+            std::cout << "Changes to be committed: " << std::endl;
+            for(size_t i=0;i<staged.size();i++){
+                std::cout << "    "<< "modified: " << staged.at(i) << std::endl;
+            }
+            std::cout << "\nChanges not staged for Commit: " << std::endl;
+            for(size_t i=0;i<unstaged.size();i++){
+                std::cout << "    "<< "modified: " << unstaged.at(i) << std::endl;
+            }
+
+            std::cout << "\nUntracked Files:" << std::endl;
+            for(size_t i=0;i<untracked.size();i++){
+                std::cout  << "    " << untracked.at(i) << std::endl;
+            }
+            
+           
+        }
+
         void basicGit::commit(const std::string& commitMessage) { // create tree + commit
             // Code to commit changes
         }
